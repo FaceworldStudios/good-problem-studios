@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Good Problem Studios</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:         #f3f2ee;
+      --ink:        #1a1a1a;
+      --ink-mid:    #555;
+      --ink-dim:    #aaa;
+      --ink-faint:  #d4d3cf;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'Space Grotesk', sans-serif;
+      cursor: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Canvas ─────────────────────────────────── */
+    #globe-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+
+    /* ── Custom cursor ───────────────────────────── */
+    #cursor {
+      position: fixed;
+      pointer-events: none;
+      z-index: 200;
+      transform: translate(-50%, -50%);
+      transition: transform 0.05s;
+    }
+    #cursor svg { display: block; }
+
+    /* ── Corner brackets ─────────────────────────── */
+    .bracket {
+      position: fixed;
+      width: 22px; height: 22px;
+      z-index: 20;
+      pointer-events: none;
+    }
+    .bracket.tl { top: 20px; left: 20px;   border-top: 1px solid var(--ink-dim); border-left: 1px solid var(--ink-dim); }
+    .bracket.tr { top: 20px; right: 20px;  border-top: 1px solid var(--ink-dim); border-right: 1px solid var(--ink-dim); }
+    .bracket.bl { bottom: 20px; left: 20px;  border-bottom: 1px solid var(--ink-dim); border-left: 1px solid var(--ink-dim); }
+    .bracket.br { bottom: 20px; right: 20px; border-bottom: 1px solid var(--ink-dim); border-right: 1px solid var(--ink-dim); }
+
+    /* ── Scan line ───────────────────────────────── */
+    #scanline {
+      position: fixed; left: 0; width: 100%; height: 1px;
+      background: linear-gradient(to right, transparent 10%, rgba(26,26,26,0.05) 50%, transparent 90%);
+      z-index: 5;
+      animation: scan 10s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes scan { from { top: -2px; } to { top: 102vh; } }
+
+    /* ── UI layer ────────────────────────────────── */
+    #ui {
+      position: fixed; inset: 0;
+      z-index: 10;
+      pointer-events: none;
+      display: flex; flex-direction: column;
+      padding: 32px 40px;
+    }
+
+    /* Header */
+    #header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    #logo {
+      display: flex;
+      align-items: center;
+    }
+
+    #gps-logo {
+      display: block;
+      flex-shrink: 0;
+    }
+
+    #status-block {
+      font-family: 'Space Mono', monospace;
+      font-size: 8.5px;
+      letter-spacing: .14em;
+      color: var(--ink-dim);
+      text-transform: uppercase;
+      text-align: right;
+      line-height: 2.2;
+    }
+    #status-block .live {
+      color: var(--ink);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .blinker {
+      width: 5px; height: 5px;
+      background: var(--ink);
+      border-radius: 50%;
+      display: inline-block;
+      animation: blink 1.6s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.1} }
+
+    /* Center */
+    #center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 10px;
+    }
+
+    #headline {
+      font-size: clamp(30px, 4.5vw, 62px);
+      font-weight: 300;
+      letter-spacing: -.01em;
+      line-height: 1.12;
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 1.2s cubic-bezier(.16,1,.3,1), transform 1.2s cubic-bezier(.16,1,.3,1);
+    }
+    #headline em { font-style: italic; font-weight: 500; }
+    #headline.show { opacity: 1; transform: translateY(0); }
+
+    #tagline {
+      font-family: 'Space Mono', monospace;
+      font-size: clamp(8px, 1vw, 10px);
+      letter-spacing: .28em;
+      text-transform: uppercase;
+      color: var(--ink-mid);
+      opacity: 0;
+      transition: opacity 1s .4s;
+    }
+    #tagline.show { opacity: 1; }
+
+    #divider {
+      width: 40px; height: 1px;
+      background: var(--ink-faint);
+      margin: 4px auto;
+      opacity: 0;
+      transition: opacity 1s .7s;
+    }
+    #divider.show { opacity: 1; }
+
+    #hint {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      opacity: 0;
+      transition: opacity 1s 1.4s;
+    }
+    #hint.show { opacity: 1; }
+
+    /* Footer */
+    #footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .data-block {
+      font-family: 'Space Mono', monospace;
+      line-height: 2;
+    }
+    .data-label {
+      font-size: 8px;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .data-value {
+      font-size: 11px;
+      letter-spacing: .08em;
+      color: var(--ink);
+    }
+
+    #signal-strength {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      margin-top: 6px;
+    }
+    .bar {
+      width: 4px;
+      background: var(--ink);
+      border-radius: 1px;
+      opacity: .15;
+      transition: opacity .3s, height .3s;
+    }
+    .bar.active { opacity: 1; }
+    .bar1 { height: 6px; }
+    .bar2 { height: 10px; }
+    .bar3 { height: 14px; }
+    .bar4 { height: 18px; }
+    .bar5 { height: 22px; }
+
+    /* ── Toast ───────────────────────────────────── */
+    #toast {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: .3em;
+      text-transform: uppercase;
+      background: var(--ink);
+      color: var(--bg);
+      padding: 12px 28px;
+      pointer-events: none;
+      z-index: 300;
+      opacity: 0;
+      transition: opacity .25s;
+    }
+    #toast.show { opacity: 1; }
+
+    /* ── Note label ──────────────────────────────── */
+    #note-display {
+      position: fixed;
+      bottom: 38px; left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      letter-spacing: .22em;
+      color: var(--ink-dim);
+      text-transform: uppercase;
+      pointer-events: none;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity .4s;
+    }
+    #note-display.show { opacity: 1; }
+
+    /* Fade in logo/ui on load */
+    #ui { opacity: 0; transition: opacity .8s .2s; }
+    #ui.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- Corner brackets -->
+  <div class="bracket tl"></div>
+  <div class="bracket tr"></div>
+  <div class="bracket bl"></div>
+  <div class="bracket br"></div>
+
+  <!-- Scanline -->
+  <div id="scanline"></div>
+
+  <!-- Globe canvas -->
+  <canvas id="globe-canvas"></canvas>
+
+  <!-- Custom cursor -->
+  <div id="cursor">
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <line x1="16" y1="0" x2="16" y2="32" stroke="#1a1a1a" stroke-width="0.8" opacity="0.5"/>
+      <line x1="0" y1="16" x2="32" y2="16" stroke="#1a1a1a" stroke-width="0.8" opacity="0.5"/>
+      <circle cx="16" cy="16" r="4" stroke="#1a1a1a" stroke-width="0.8" fill="none"/>
+      <circle cx="16" cy="16" r="1.5" fill="#1a1a1a"/>
+    </svg>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast">LOCATION ACQUIRED</div>
+
+  <!-- Note label -->
+  <div id="note-display">— · —</div>
+
+  <!-- UI -->
+  <div id="ui">
+    <div id="header">
+      <div id="logo">
+        <svg id="gps-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 584.33 340.04" width="48" height="28" aria-label="Good Problem Studios"><g><path d="M172.61,4.88v93.37h-8.37c-1.96-9.64-4.7-19.34-8.03-28.62-8.59-23.93-22.39-50.17-52.33-45.95-37.04,5.22-38.02,67.95-39.39,96.16-1.74,35.81-2.03,74.32.34,110.1,1.63,24.55,5.94,84.27,41.33,82.49,23.02-1.16,28.4-27,28.3-45.66l-.02-83.18h-27.45v-21.75h78.32v165.32c7.45-4.24,12.02-12.31,13.3-20.67.44-2.86.3-5.74.78-8.59-.13-76.64.05-153.33,0-229.58,0-11.75.51-24.89-.35-36.49-.7-9.39-6.14-18.87-15.73-21.26v-5.19c0-.92,2.81-.17,3.5-.15,35.87.99,71.9-.78,107.79-.01,39.22,2.26,68.72,29.59,75.71,67.87,8.43,46.17-8.95,99.02-55.87,115.94-13.35,4.81-25.85,5.54-39.94,5.61-5.96.03-12.43-1.02-18.41-.37-1.77.19-.83,1.11-.8,2.51.55,31.08-.26,62.34-.37,93.37-.02,7.3-.09,16.23,2.35,23.11,2.72,7.68,8.57,12.51,16.27,14.87l-.18,7.56-92.41-.02-16.88-34.63c-12.31,21.65-34.2,37.35-59.58,38.82-62.6,3.62-90.94-52.5-99.52-105.64C-3.22,183.46-2.83,108.84,17.92,61.21S78.14-8.41,128.43,2.7c9.75,2.15,16.75,6.21,25.68,9.13,4.39,1.43,7.44-.26,10.8-3.1,2.72-2.29,3.24-4.78,7.69-3.85ZM255.28,172.21c10.05-.47,20.6,1.41,30.21-2.09,29.44-10.71,29.32-58.15,28.35-83.74-.6-15.69-1.81-35.68-12.38-48.19-12.08-14.3-29.59-9.86-46.18-10.55v144.57Z"/><path d="M520.37,4.88v93.37h-7.7c-.39-2.62-1.08-5.22-1.77-7.77-6.71-25.02-20.06-67.41-51.27-69.22-25.78-1.49-33.96,21.39-30.93,43.31,2.51,18.11,13.98,34.23,25.4,47.89,26.13,31.26,63.49,62.15,75.47,102.25,11.03,36.91,4.47,85.07-27.65,109.56-30.5,23.26-76.5,18.56-108.25.26l-10.69,11.67-4.2.32-3.01-106.76h9.04c6.56,26.36,16.32,58.11,37.31,76.65,22.14,19.54,51.38,12.67,58.99-16.67s-3.11-54.24-20-76.19c-31.51-40.95-80.07-72.14-82.34-129.18-2.52-63.53,51.16-99.06,110.12-78.31,4.22,1.48,10.57,5.17,14.4,6.01,4.2.93,7.94-1.88,10.89-4.51.61-.55,1.88-2.38,2.16-2.52.98-.48,2.89,0,4.02-.16Z"/><path d="M557.12,2.97c22.8-1.28,35.87,25.94,20.66,43.08-10.9,12.28-30.24,11.92-40.14-1.37-12.42-16.66-1.14-40.54,19.48-41.7ZM556.78,8.66c-27.91,2.68-20.62,47.55,7.1,39.56,22.58-6.51,16.31-41.8-7.1-39.56Z"/><path d="M570.58,42.7h-6.69l-6-12.57c-.78-.89-2.6-.35-3.7-.48v13.39h-5.86l-.5-.5V15.59h16.57c1.73,0,4.79,3.17,5.11,4.93.88,4.81-.93,7.53-5.27,9.31l6.35,12.86ZM554.18,26.97h6.86c1.3,0,2.82-2.26,2.87-3.52s-1.27-3.51-2.53-3.51h-7.2v7.03Z"/></g></svg>
+      </div>
+
+      <div id="status-block">
+        <div class="live"><span class="blinker"></span> Signal Active</div>
+        <div id="utc-time">00:00:00 UTC</div>
+      </div>
+    </div>
+
+    <div id="center">
+      <div id="headline">We help <em>artists</em><br>find their way.</div>
+      <div id="tagline">Good Problem Studios &nbsp;·&nbsp; Navigating Sound</div>
+      <div id="divider"></div>
+      <div id="hint">Drag the globe · Click to lock coordinates</div>
+    </div>
+
+    <div id="footer">
+      <div class="data-block">
+        <div class="data-label">Latitude</div>
+        <div class="data-value" id="lat-val">0.0000°</div>
+        <div class="data-label" style="margin-top:8px">Longitude</div>
+        <div class="data-value" id="lon-val">0.0000°</div>
+      </div>
+
+      <div class="data-block" style="text-align:right">
+        <div class="data-label">Signal</div>
+        <div id="signal-strength">
+          <div class="bar bar1 active"></div>
+          <div class="bar bar2 active"></div>
+          <div class="bar bar3 active"></div>
+          <div class="bar bar4"></div>
+          <div class="bar bar5"></div>
+        </div>
+        <div class="data-label" style="margin-top:8px; font-size:8px" id="note-name">A3</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    // ── Renderer ────────────────────────────────────────
+    const canvas = document.getElementById('globe-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    camera.position.z = 2.6;
+
+    function resize() {
+      const W = innerWidth, H = innerHeight;
+      renderer.setSize(W, H);
+      camera.aspect = W / H;
+      camera.updateProjectionMatrix();
+    }
+    resize();
+    addEventListener('resize', resize);
+
+    // ── Globe group ─────────────────────────────────────
+    const globe = new THREE.Group();
+    scene.add(globe);
+
+    // Helpers
+    function latLonToVec3(lat, lon, r = 1) {
+      const phi   = (90 - lat)  * Math.PI / 180;
+      const theta = (lon + 180) * Math.PI / 180;
+      return new THREE.Vector3(
+        -r * Math.sin(phi) * Math.cos(theta),
+         r * Math.cos(phi),
+         r * Math.sin(phi) * Math.sin(theta)
+      );
+    }
+
+    // Inner fill sphere
+    const fillMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.992, 64, 64),
+      new THREE.MeshBasicMaterial({ color: 0xf3f2ee, transparent: true, opacity: 0.55 })
+    );
+    globe.add(fillMesh);
+
+    // Lat lines
+    function addLatLine(latDeg, segments, opacity) {
+      const pts = [];
+      const lat = latDeg * Math.PI / 180;
+      for (let i = 0; i <= segments; i++) {
+        const lon = (i / segments) * Math.PI * 2;
+        pts.push(new THREE.Vector3(
+          Math.cos(lat) * Math.cos(lon),
+          Math.sin(lat),
+          Math.cos(lat) * Math.sin(lon)
+        ));
+      }
+      globe.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity })
+      ));
+    }
+
+    // Lon lines
+    function addLonLine(lonDeg, segments, opacity) {
+      const pts = [];
+      const lon = lonDeg * Math.PI / 180;
+      for (let i = 0; i <= segments; i++) {
+        const lat = ((i / segments) - 0.5) * Math.PI;
+        pts.push(new THREE.Vector3(
+          Math.cos(lat) * Math.cos(lon),
+          Math.sin(lat),
+          Math.cos(lat) * Math.sin(lon)
+        ));
+      }
+      globe.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity })
+      ));
+    }
+
+    for (let lat = -80; lat <= 80; lat += 15) {
+      addLatLine(lat, 128, lat === 0 ? 0.28 : 0.09);
+    }
+    for (let lon = 0; lon < 360; lon += 15) {
+      addLonLine(lon, 128, (lon === 0 || lon === 180) ? 0.28 : 0.09);
+    }
+
+    // Outer wireframe
+    globe.add(new THREE.Mesh(
+      new THREE.SphereGeometry(1, 64, 64),
+      new THREE.MeshBasicMaterial({ color: 0x1a1a1a, wireframe: true, transparent: true, opacity: 0.04 })
+    ));
+
+    // City markers
+    const CITIES = [
+      [40.71,-74.01],[51.51,-0.13],[35.68,139.65],[48.86,2.35],
+      [-33.87,151.21],[55.76,37.62],[19.43,-99.13],[-23.55,-46.63],
+      [1.35,103.82],[37.77,-122.42],[28.61,77.21],[6.52,3.38],
+      [-1.29,36.82],[55.68,12.57],[59.33,18.07]
+    ];
+
+    const markers = [];
+    CITIES.forEach(([lat, lon], idx) => {
+      const pos = latLonToVec3(lat, lon, 1.015);
+
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.007, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0x1a1a1a })
+      );
+      dot.position.copy(pos);
+      globe.add(dot);
+
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.022, 0.003, 6, 32),
+        new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.35 })
+      );
+      ring.position.copy(pos);
+      ring.lookAt(0, 0, 0);
+      globe.add(ring);
+      markers.push({ ring, offset: idx * 0.42 });
+    });
+
+    // ── Drag interaction ────────────────────────────────
+    let dragging = false;
+    let px = 0, py = 0;
+    let velX = 0, velY = 0;
+    let currentLat = 0, currentLon = 0;
+    let dragVelocity = 0;
+
+    function onDown(x, y) { dragging = true; px = x; py = y; velX = velY = 0; }
+    function onUp()        { dragging = false; }
+
+    function onMove(x, y) {
+      // Cursor
+      const c = document.getElementById('cursor');
+      c.style.left = x + 'px';
+      c.style.top  = y + 'px';
+
+      if (!dragging) return;
+      const dx = x - px, dy = y - py;
+      velY = dx * 0.006;
+      velX = dy * 0.006;
+      globe.rotation.y += velY;
+      globe.rotation.x += velX;
+      globe.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, globe.rotation.x));
+      px = x; py = y;
+
+      dragVelocity = Math.sqrt(dx * dx + dy * dy);
+      currentLat = -(globe.rotation.x * 180 / Math.PI);
+      currentLon =  (globe.rotation.y * 180 / Math.PI) % 360;
+      document.getElementById('lat-val').textContent = currentLat.toFixed(4) + '°';
+      document.getElementById('lon-val').textContent = currentLon.toFixed(4) + '°';
+
+      updateSignalBars(dragVelocity);
+      playTone(currentLat, dragVelocity);
+    }
+
+    function onPing() { playPing(); showToast('LOCATION ACQUIRED'); }
+
+    canvas.addEventListener('mousedown', e => onDown(e.clientX, e.clientY));
+    addEventListener('mouseup', onUp);
+    addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+    canvas.addEventListener('click', onPing);
+
+    canvas.addEventListener('touchstart', e => { onDown(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+    canvas.addEventListener('touchend',   onUp);
+    canvas.addEventListener('touchmove',  e => {
+      e.preventDefault();
+      onMove(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+    canvas.addEventListener('touchend', onPing);
+
+    // ── Signal bars ─────────────────────────────────────
+    function updateSignalBars(v) {
+      const n = v < 1 ? 1 : v < 3 ? 2 : v < 6 ? 3 : v < 10 ? 4 : 5;
+      document.querySelectorAll('.bar').forEach((b, i) => {
+        b.classList.toggle('active', i < n);
+      });
+    }
+
+    // ── Web Audio ────────────────────────────────────────
+    let audioCtx = null;
+    function ctx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+
+    // Pentatonic scale (A minor pentatonic)
+    const SCALE = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.25, 784];
+    const NOTE_NAMES = ['A3','C4','D4','E4','G4','A4','C5','D5','E5','G5'];
+
+    let lastTone = 0;
+    function playTone(lat, velocity) {
+      const now = Date.now();
+      if (now - lastTone < 90 || velocity < 1.5) return;
+      lastTone = now;
+
+      try {
+        const ac = ctx();
+        const idx  = Math.floor(((lat + 90) / 180) * SCALE.length) % SCALE.length;
+        const freq = SCALE[idx];
+        document.getElementById('note-name').textContent = NOTE_NAMES[idx];
+
+        const osc = ac.createOscillator();
+        const gn  = ac.createGain();
+        const flt = ac.createBiquadFilter();
+
+        osc.connect(flt); flt.connect(gn); gn.connect(ac.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ac.currentTime);
+        flt.type = 'lowpass';
+        flt.frequency.setValueAtTime(1200, ac.currentTime);
+
+        const vol = Math.min(0.09, velocity * 0.004);
+        gn.gain.setValueAtTime(0, ac.currentTime);
+        gn.gain.linearRampToValueAtTime(vol, ac.currentTime + 0.025);
+        gn.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.55);
+
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.55);
+
+        // Show note display
+        const nd = document.getElementById('note-display');
+        nd.textContent = '♩ ' + NOTE_NAMES[idx];
+        nd.classList.add('show');
+        clearTimeout(nd._t);
+        nd._t = setTimeout(() => nd.classList.remove('show'), 800);
+      } catch (_) {}
+    }
+
+    function playPing() {
+      try {
+        const ac = ctx();
+        [523.25, 659.25, 880].forEach((f, i) => {
+          const osc = ac.createOscillator();
+          const gn  = ac.createGain();
+          osc.connect(gn); gn.connect(ac.destination);
+          osc.type = 'sine';
+          const t0 = ac.currentTime + i * 0.12;
+          osc.frequency.setValueAtTime(f, t0);
+          gn.gain.setValueAtTime(0, t0);
+          gn.gain.linearRampToValueAtTime(0.07, t0 + 0.02);
+          gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
+          osc.start(t0); osc.stop(t0 + 0.7);
+        });
+      } catch (_) {}
+    }
+
+    // ── Toast ─────────────────────────────────────────────
+    let toastTimer;
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+    }
+
+    // ── UTC clock ─────────────────────────────────────────
+    function tickClock() {
+      const d = new Date();
+      const hh = String(d.getUTCHours()).padStart(2,'0');
+      const mm = String(d.getUTCMinutes()).padStart(2,'0');
+      const ss = String(d.getUTCSeconds()).padStart(2,'0');
+      document.getElementById('utc-time').textContent = hh + ':' + mm + ':' + ss + ' UTC';
+    }
+    tickClock();
+    setInterval(tickClock, 1000);
+
+    // ── Animation loop ────────────────────────────────────
+    let t = 0;
+    function tick() {
+      requestAnimationFrame(tick);
+      t += 0.012;
+
+      if (!dragging) {
+        globe.rotation.y += 0.0014;
+        velX *= 0.9;
+        velY *= 0.9;
+      }
+      dragVelocity *= 0.88;
+
+      // Pulse city rings
+      markers.forEach(({ ring, offset }) => {
+        const s = 1 + 0.25 * Math.sin(t + offset);
+        ring.scale.setScalar(s);
+        ring.material.opacity = 0.18 + 0.18 * Math.sin(t + offset);
+      });
+
+      renderer.render(scene, camera);
+    }
+    tick();
+
+    // ── Reveal sequence ───────────────────────────────────
+    document.getElementById('ui').classList.add('show');
+    setTimeout(() => document.getElementById('headline').classList.add('show'), 700);
+    setTimeout(() => document.getElementById('tagline').classList.add('show'), 1300);
+    setTimeout(() => document.getElementById('divider').classList.add('show'), 1600);
+    setTimeout(() => document.getElementById('hint').classList.add('show'), 2200);
+
+  })();
+  </script>
+</body>
+</html>
