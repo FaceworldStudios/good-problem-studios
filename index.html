@@ -820,15 +820,6 @@
         velX *= 0.9;
         velY *= 0.9;
 
-        // Ambient blobs — slow, large, lazy — keep the page alive when idle
-        const now = Date.now();
-        if (now - lastAmbientMs > 2800) {
-          lastAmbientMs = now;
-          // Random position drifting gently around center
-          const ax = innerWidth  * (0.25 + Math.random() * 0.50);
-          const ay = innerHeight * (0.20 + Math.random() * 0.60);
-          spawnBlob(ax, ay, 1.5); // larger, slower ambient blob
-        }
       }
       dragVelocity *= 0.88;
 
