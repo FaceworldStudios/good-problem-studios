@@ -500,12 +500,16 @@
         cityParticles.push({
           x: sx, y: sy,
           vx:    Math.cos(angle) * spd,
-          vy:    Math.sin(angle) * spd - 0.14, // slight upward drift
+          vy:    Math.sin(angle) * spd - 0.14,
           life:  0,
-          speed: 0.004 + Math.random() * 0.004, // ~3.5–7s lifetime
+          speed: 0.004 + Math.random() * 0.004,
           char:  PARTICLE_CHARS[Math.floor(Math.random() * PARTICLE_CHARS.length)],
-          size:  7 + Math.floor(Math.random() * 5)
+          size:  7 + Math.floor(Math.random() * 5),
+          hue:   (trailHue + Math.random() * 40) % 360,
+          sat:   78 + Math.random() * 18,
+          lit:   48 + Math.random() * 16
         });
+        trailHue = (trailHue + 18 + Math.random() * 28) % 360;
       });
     }
 
@@ -582,7 +586,7 @@
         pCtx.save();
         pCtx.globalAlpha = a;
         pCtx.font = `${p.size}px 'Space Mono', monospace`;
-        pCtx.fillStyle = '#1a1a1a';
+        pCtx.fillStyle = `hsl(${p.hue}, ${p.sat}%, ${p.lit}%)`;
         pCtx.fillText(p.char, p.x, p.y);
         pCtx.restore();
       }
