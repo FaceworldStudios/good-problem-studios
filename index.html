@@ -29,11 +29,32 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    /* ── Trail canvas ────────────────────────────── */
+    #trail-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
     /* ── Canvas ─────────────────────────────────── */
     #globe-canvas {
       position: fixed;
       inset: 0;
       z-index: 1;
+    }
+
+    /* ── Grain overlay ───────────────────────────── */
+    #grain {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+      opacity: 0.055;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 180px 180px;
+      mix-blend-mode: overlay;
     }
 
     /* ── Custom cursor ───────────────────────────── */
@@ -267,6 +288,12 @@
   <!-- Scanline -->
   <div id="scanline"></div>
 
+  <!-- Gradient trail canvas (behind globe) -->
+  <canvas id="trail-canvas"></canvas>
+
+  <!-- Grain texture overlay -->
+  <div id="grain"></div>
+
   <!-- Globe canvas -->
   <canvas id="globe-canvas"></canvas>
 
@@ -332,6 +359,78 @@
   <script>
   (function () {
     'use strict';
+
+    // ── Gradient trail ──────────────────────────────────
+    const trailCanvas = document.getElementById('trail-canvas');
+    const tCtx = trailCanvas.getContext('2d');
+
+    function resizeTrail() {
+      trailCanvas.width  = innerWidth;
+      trailCanvas.height = innerHeight;
+    }
+    resizeTrail();
+    addEventListener('resize', resizeTrail);
+
+    const blobs = [];
+    const MAX_BLOBS = 60;
+    let trailHue = 270 + Math.random() * 60; // start in violet-pink range
+    let lastSpawnMs  = 0;
+    let lastAmbientMs = 0;
+
+    function spawnBlob(x, y, ambientScale) {
+      if (blobs.length >= MAX_BLOBS) blobs.shift();
+      const sc = ambientScale || 1;
+      const r  = (140 + Math.random() * 110) * sc;
+      blobs.push({
+        x, y,
+        rx:   r,
+        ry:   r * (0.58 + Math.random() * 0.42),   // slight ellipse
+        rot:  Math.random() * Math.PI * 2,
+        h1:   trailHue,
+        h2:   (trailHue + 38 + Math.random() * 48) % 360,
+        sat:  78 + Math.random() * 16,
+        lit:  62 + Math.random() * 14,
+        peak: (0.38 + Math.random() * 0.20) * sc,
+        vx:   (Math.random() - 0.5) * 0.20,
+        vy:   (Math.random() - 0.5) * 0.20,
+        life:  0,
+        speed: 0.0035 + Math.random() * 0.0028   // 4–6 s lifetime @ 60 fps
+      });
+      trailHue = (trailHue + 24 + Math.random() * 34) % 360;
+    }
+
+    function drawTrail() {
+      tCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+      for (let i = blobs.length - 1; i >= 0; i--) {
+        const b = blobs[i];
+        b.life += b.speed;
+        b.x += b.vx;
+        b.y += b.vy;
+        if (b.life >= 1) { blobs.splice(i, 1); continue; }
+
+        // Fade in fast (first 12%), then slowly dissolve
+        const a = b.life < 0.12
+          ? (b.life / 0.12) * b.peak
+          : b.peak * Math.max(0, 1 - (b.life - 0.12) / 0.88);
+
+        tCtx.save();
+        tCtx.globalAlpha = a;
+        tCtx.translate(b.x, b.y);
+        tCtx.rotate(b.rot);
+        tCtx.scale(1, b.ry / b.rx);
+
+        const g = tCtx.createRadialGradient(0, 0, 0, 0, 0, b.rx);
+        g.addColorStop(0,   `hsl(${b.h1}, ${b.sat}%, ${b.lit}%)`);
+        g.addColorStop(0.5, `hsl(${b.h2}, ${b.sat - 6}%, ${b.lit + 5}%)`);
+        g.addColorStop(1,   `hsla(${b.h1}, ${b.sat}%, ${b.lit}%, 0)`);
+
+        tCtx.fillStyle = g;
+        tCtx.beginPath();
+        tCtx.arc(0, 0, b.rx, 0, Math.PI * 2);
+        tCtx.fill();
+        tCtx.restore();
+      }
+    }
 
     // ── Renderer ────────────────────────────────────────
     const canvas = document.getElementById('globe-canvas');
@@ -467,6 +566,14 @@
       const c = document.getElementById('cursor');
       c.style.left = x + 'px';
       c.style.top  = y + 'px';
+
+      // Spawn gradient blob — faster when dragging, slower when just hovering
+      const now = Date.now();
+      const interval = dragging ? 55 : 160;
+      if (now - lastSpawnMs > interval) {
+        spawnBlob(x, y);
+        lastSpawnMs = now;
+      }
 
       if (!dragging) return;
       const dx = x - px, dy = y - py;
@@ -709,8 +816,21 @@
         globe.rotation.y += 0.0014;
         velX *= 0.9;
         velY *= 0.9;
+
+        // Ambient blobs — slow, large, lazy — keep the page alive when idle
+        const now = Date.now();
+        if (now - lastAmbientMs > 2800) {
+          lastAmbientMs = now;
+          // Random position drifting gently around center
+          const ax = innerWidth  * (0.25 + Math.random() * 0.50);
+          const ay = innerHeight * (0.20 + Math.random() * 0.60);
+          spawnBlob(ax, ay, 1.5); // larger, slower ambient blob
+        }
       }
       dragVelocity *= 0.88;
+
+      // Draw gradient trail behind globe
+      drawTrail();
 
       // Pulse city rings
       markers.forEach(({ ring, offset }) => {
