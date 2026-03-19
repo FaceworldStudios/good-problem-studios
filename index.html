@@ -483,7 +483,7 @@
     function maybeSeedCityParticles() {
       if (!dragging) return;
       CITIES.forEach(([lat, lon]) => {
-        if (Math.random() > 0.22) return; // ~22% chance per city per frame
+        if (Math.random() > (isMobile ? 0.10 : 0.22)) return; // fewer particles on mobile
 
         // Is this city facing the camera? (world-space normal z > 0)
         _tv.copy(latLonToVec3(lat, lon, 1)).transformDirection(globe.matrixWorld);
@@ -593,23 +593,41 @@
     }
 
     // ── Renderer ────────────────────────────────────────
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                     || innerWidth < 768;
+
     const canvas = document.getElementById('globe-canvas');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias:       !isMobile, // antialias + high-DPI = context loss on mobile
+      alpha:           true,
+      powerPreference: 'low-power'
+    });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1 : 2));
     renderer.setClearColor(0x000000, 0);
+
+    // Recover from WebGL context loss (common on mobile when tab is backgrounded)
+    canvas.addEventListener('webglcontextlost',    e  => e.preventDefault(), false);
+    canvas.addEventListener('webglcontextrestored', () => location.reload(),  false);
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
     camera.position.z = 2.6;
 
     function resize() {
-      const W = innerWidth, H = innerHeight;
+      // Use visualViewport when available — avoids the iOS address-bar jump
+      const W = (window.visualViewport ? window.visualViewport.width  : innerWidth);
+      const H = (window.visualViewport ? window.visualViewport.height : innerHeight);
       renderer.setSize(W, H);
       camera.aspect = W / H;
       camera.updateProjectionMatrix();
+      // Keep 2D canvases in sync
+      trailCanvas.width    = W; trailCanvas.height    = H;
+      particleCanvas.width = W; particleCanvas.height = H;
     }
     resize();
     addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
     // ── Globe group ─────────────────────────────────────
     const globe = new THREE.Group();
