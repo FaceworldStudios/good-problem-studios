@@ -687,7 +687,15 @@
       [40.71,-74.01],[51.51,-0.13],[35.68,139.65],[48.86,2.35],
       [-33.87,151.21],[55.76,37.62],[19.43,-99.13],[-23.55,-46.63],
       [1.35,103.82],[37.77,-122.42],[28.61,77.21],[6.52,3.38],
-      [-1.29,36.82],[55.68,12.57],[59.33,18.07]
+      [-1.29,36.82],[55.68,12.57],[59.33,18.07],
+      // 7 new — improve clustering and fill gaps
+      [52.52,13.41],   // Berlin
+      [34.05,-118.24], // Los Angeles
+      [41.85,-87.65],  // Chicago
+      [37.57,126.98],  // Seoul
+      [31.23,121.47],  // Shanghai
+      [30.04,31.24],   // Cairo
+      [-34.61,-58.38]  // Buenos Aires
     ];
 
     const markers = [];
@@ -712,8 +720,20 @@
     });
 
     // ── Constellation lines (hidden; animate on release) ──
-    // Only connect cities within 42° of each other — isolated cities get no lines
+    // Lines follow the sphere surface as great-circle arcs (lerp → normalize)
+    // so they never cut through the globe. Only pairs within 42° are connected.
     const CONSTELL_MAX_DIST = 42;
+
+    function greatArcPts(c1, c2, n) {
+      const a = latLonToVec3(...c1, 1);
+      const b = latLonToVec3(...c2, 1);
+      const pts = [];
+      for (let i = 0; i <= n; i++) {
+        pts.push(new THREE.Vector3().copy(a).lerp(b, i / n).normalize().multiplyScalar(1.019));
+      }
+      return pts;
+    }
+
     const constellMats = [];
     const seenPairs    = new Set();
     CITIES.forEach((c1, i) => {
@@ -722,12 +742,12 @@
         .filter(x => x.j !== i)
         .sort((a, b) => a.d - b.d);
       for (let k = 0; k < 2; k++) {
-        if (sorted[k].d > CONSTELL_MAX_DIST) continue; // too far — skip
+        if (sorted[k].d > CONSTELL_MAX_DIST) continue;
         const j   = sorted[k].j;
         const key = Math.min(i,j) + '_' + Math.max(i,j);
         if (seenPairs.has(key)) continue;
         seenPairs.add(key);
-        const pts = [latLonToVec3(...CITIES[i], 1.018), latLonToVec3(...CITIES[j], 1.018)];
+        const pts = greatArcPts(CITIES[i], CITIES[j], 28);
         const mat = new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0 });
         globe.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
         constellMats.push(mat);
