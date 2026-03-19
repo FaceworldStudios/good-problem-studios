@@ -44,6 +44,14 @@
       z-index: 1;
     }
 
+    /* ── Particle canvas (above globe, below grain) ─ */
+    #particle-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+    }
+
     /* ── Grain overlay ───────────────────────────── */
     #grain {
       position: fixed;
@@ -301,6 +309,9 @@
   <!-- Gradient trail canvas (behind globe) -->
   <canvas id="trail-canvas"></canvas>
 
+  <!-- Particle canvas (city dot trails — sits above globe) -->
+  <canvas id="particle-canvas"></canvas>
+
   <!-- Grain texture overlay -->
   <div id="grain"></div>
 
@@ -389,7 +400,16 @@
     // Ripple rings (drawn on trail canvas)
     const ripples = [];
 
-    // City dot particle trails
+    // City dot particle trails — rendered on a separate canvas ABOVE the globe
+    const particleCanvas = document.getElementById('particle-canvas');
+    const pCtx = particleCanvas.getContext('2d');
+    function resizeParticle() {
+      particleCanvas.width  = innerWidth;
+      particleCanvas.height = innerHeight;
+    }
+    resizeParticle();
+    addEventListener('resize', resizeParticle);
+
     const cityParticles = [];
     const MAX_CITY_PARTICLES = 65;
     const _tv = new THREE.Vector3(); // reusable scratch vector
@@ -542,27 +562,29 @@
         tCtx.restore();
       }
 
-      // Draw city dot particle trails
-      if (cityParticles.length > 0) {
-        tCtx.textAlign    = 'center';
-        tCtx.textBaseline = 'middle';
-        for (let i = cityParticles.length - 1; i >= 0; i--) {
-          const p = cityParticles[i];
-          p.life += p.speed;
-          p.x += p.vx;
-          p.y += p.vy;
-          if (p.life >= 1) { cityParticles.splice(i, 1); continue; }
-          // Fast fade in, slow fade out — peak opacity kept deliberately low
-          const a = p.life < 0.15
-            ? (p.life / 0.15) * 0.50
-            : 0.50 * Math.max(0, 1 - (p.life - 0.15) / 0.85);
-          tCtx.save();
-          tCtx.globalAlpha = a;
-          tCtx.font = `${p.size}px 'Space Mono', monospace`;
-          tCtx.fillStyle = '#1a1a1a';
-          tCtx.fillText(p.char, p.x, p.y);
-          tCtx.restore();
-        }
+    }
+
+    function drawCityParticles() {
+      pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+      if (cityParticles.length === 0) return;
+      pCtx.textAlign    = 'center';
+      pCtx.textBaseline = 'middle';
+      for (let i = cityParticles.length - 1; i >= 0; i--) {
+        const p = cityParticles[i];
+        p.life += p.speed;
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.life >= 1) { cityParticles.splice(i, 1); continue; }
+        // Fast fade in, slow fade out — peak opacity kept deliberately low
+        const a = p.life < 0.15
+          ? (p.life / 0.15) * 0.48
+          : 0.48 * Math.max(0, 1 - (p.life - 0.15) / 0.85);
+        pCtx.save();
+        pCtx.globalAlpha = a;
+        pCtx.font = `${p.size}px 'Space Mono', monospace`;
+        pCtx.fillStyle = '#1a1a1a';
+        pCtx.fillText(p.char, p.x, p.y);
+        pCtx.restore();
       }
     }
 
@@ -1012,6 +1034,7 @@
       // Seed city particles when dragging, then draw everything
       maybeSeedCityParticles();
       drawTrail();
+      drawCityParticles();
 
       // Constellation flash — rise fast, fade slowly
       if (constellLife > 0) {
