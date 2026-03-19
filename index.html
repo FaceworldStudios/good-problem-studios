@@ -215,6 +215,16 @@
       letter-spacing: .08em;
       color: var(--ink);
     }
+    /* Coordinate lock flicker on release */
+    @keyframes coord-lock {
+      0%   { opacity: 0.2; }
+      18%  { opacity: 1; }
+      36%  { opacity: 0.3; }
+      55%  { opacity: 1; }
+      72%  { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+    .data-value.val-flash { animation: coord-lock 0.7s ease forwards; }
 
     #signal-strength {
       display: flex;
@@ -372,10 +382,12 @@
     addEventListener('resize', resizeTrail);
 
     const blobs = [];
-    const MAX_BLOBS = 60;
+    const MAX_BLOBS = 72;
     let trailHue = 270 + Math.random() * 60; // start in violet-pink range
     let lastSpawnMs  = 0;
-    let lastAmbientMs = 0;
+
+    // Ripple rings (drawn on trail canvas)
+    const ripples = [];
 
     function spawnBlob(x, y, ambientScale) {
       if (blobs.length >= MAX_BLOBS) blobs.shift();
@@ -397,6 +409,48 @@
         speed: 0.0035 + Math.random() * 0.0028   // 4–6 s lifetime @ 60 fps
       });
       trailHue = (trailHue + 24 + Math.random() * 34) % 360;
+    }
+
+    // ── Release burst — radial scatter of blobs ──────────
+    function spawnBurst(x, y) {
+      const count = 11;
+      for (let i = 0; i < count; i++) {
+        if (blobs.length >= MAX_BLOBS) blobs.shift();
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.55;
+        const spd   = 1.1 + Math.random() * 1.6;
+        const r     = 85 + Math.random() * 85;
+        blobs.push({
+          x, y,
+          rx:   r,
+          ry:   r * (0.55 + Math.random() * 0.45),
+          rot:  Math.random() * Math.PI * 2,
+          h1:   trailHue,
+          h2:   (trailHue + 42 + Math.random() * 52) % 360,
+          sat:  82 + Math.random() * 14,
+          lit:  58 + Math.random() * 16,
+          peak: 0.55 + Math.random() * 0.25,   // brighter than trail
+          vx:   Math.cos(angle) * spd,
+          vy:   Math.sin(angle) * spd,
+          life:  0,
+          speed: 0.009 + Math.random() * 0.006  // ~1.8–3s, quick burst
+        });
+        trailHue = (trailHue + 26 + Math.random() * 30) % 360;
+      }
+    }
+
+    // ── Release ripple — concentric rings from globe centre ─
+    function spawnRipple() {
+      const cx = innerWidth  / 2;
+      const cy = innerHeight / 2;
+      for (let i = 0; i < 3; i++) {
+        ripples.push({
+          x: cx, y: cy,
+          maxR:  Math.min(innerWidth, innerHeight) * (0.28 + i * 0.10),
+          life:  0,
+          delay: i * 0.16,   // stagger each ring
+          alpha: 0.20 - i * 0.05
+        });
+      }
     }
 
     function drawTrail() {
@@ -431,6 +485,24 @@
         tCtx.beginPath();
         tCtx.arc(0, 0, b.rx, 0, Math.PI * 2);
         tCtx.fill();
+        tCtx.restore();
+      }
+
+      // Draw expanding ripple rings
+      for (let i = ripples.length - 1; i >= 0; i--) {
+        const rp = ripples[i];
+        rp.life += 0.010;
+        if (rp.life < rp.delay) continue;
+        const prog = Math.min(1, (rp.life - rp.delay) / 1.1);
+        if (prog >= 1) { ripples.splice(i, 1); continue; }
+        const r = rp.maxR * prog;
+        const a = rp.alpha * (1 - prog) * (prog < 0.06 ? prog / 0.06 : 1);
+        tCtx.save();
+        tCtx.strokeStyle = `rgba(26, 26, 26, ${a})`;
+        tCtx.lineWidth = 0.8;
+        tCtx.beginPath();
+        tCtx.arc(rp.x, rp.y, r, 0, Math.PI * 2);
+        tCtx.stroke();
         tCtx.restore();
       }
     }
@@ -554,15 +626,45 @@
       markers.push({ ring, offset: idx * 0.42 });
     });
 
+    // ── Constellation lines (hidden; animate on release) ──
+    const constellMats = [];
+    const seenPairs    = new Set();
+    CITIES.forEach((c1, i) => {
+      // Connect each city to its 2 nearest neighbours
+      const sorted = CITIES
+        .map((c2, j) => ({ j, d: Math.hypot(c1[0]-c2[0], c1[1]-c2[1]) }))
+        .filter(x => x.j !== i)
+        .sort((a, b) => a.d - b.d);
+      for (let k = 0; k < 2; k++) {
+        const j   = sorted[k].j;
+        const key = Math.min(i,j) + '_' + Math.max(i,j);
+        if (seenPairs.has(key)) continue;
+        seenPairs.add(key);
+        const pts = [latLonToVec3(...CITIES[i], 1.018), latLonToVec3(...CITIES[j], 1.018)];
+        const mat = new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0 });
+        globe.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        constellMats.push(mat);
+      }
+    });
+    let constellLife = 0; // > 0 while animating
+
     // ── Drag interaction ────────────────────────────────
     let dragging = false;
     let px = 0, py = 0;
     let velX = 0, velY = 0;
     let currentLat = 0, currentLon = 0;
     let dragVelocity = 0;
+    let dragTotal = 0;      // accumulated drag distance since mousedown
+    let lastDragX = 0, lastDragY = 0;
 
-    function onDown(x, y) { dragging = true; px = x; py = y; velX = velY = 0; }
-    function onUp()        { dragging = false; }
+    function onDown(x, y) {
+      dragging = true; px = x; py = y; velX = velY = 0;
+      dragTotal = 0; lastDragX = x; lastDragY = y;
+    }
+    function onUp() {
+      if (dragging && dragTotal > 25) triggerPayoff(lastDragX, lastDragY);
+      dragging = false;
+    }
 
     function onMove(x, y) {
       // Custom crosshair cursor
@@ -586,6 +688,8 @@
       globe.rotation.x += velX;
       globe.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, globe.rotation.x));
       px = x; py = y;
+      lastDragX = x; lastDragY = y;
+      dragTotal += Math.sqrt(dx * dx + dy * dy);
 
       dragVelocity = Math.sqrt(dx * dx + dy * dy);
       currentLat = -(globe.rotation.x * 180 / Math.PI);
@@ -798,6 +902,29 @@
       toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
     }
 
+    // ── Release payoff ────────────────────────────────────
+    function flashCoords() {
+      // Cascade signal bars up to 5, then settle back
+      const bars = document.querySelectorAll('.bar');
+      bars.forEach((b, i) => setTimeout(() => b.classList.add('active'), i * 55));
+      setTimeout(() => updateSignalBars(dragVelocity), 1600);
+      // Flicker lat/lon like a GPS lock
+      ['lat-val', 'lon-val'].forEach(id => {
+        const el = document.getElementById(id);
+        el.classList.remove('val-flash');
+        void el.offsetWidth; // force reflow to restart animation
+        el.classList.add('val-flash');
+        setTimeout(() => el.classList.remove('val-flash'), 800);
+      });
+    }
+
+    function triggerPayoff(x, y) {
+      spawnBurst(x, y);      // gradient blobs scatter outward
+      spawnRipple();         // concentric rings from globe centre
+      constellLife = 1.0;    // constellation flash on globe
+      flashCoords();         // coord/signal UI lock flicker
+    }
+
     // ── UTC clock ─────────────────────────────────────────
     function tickClock() {
       const d = new Date();
@@ -823,8 +950,18 @@
       }
       dragVelocity *= 0.88;
 
-      // Draw gradient trail behind globe
+      // Draw gradient trail + ripples behind globe
       drawTrail();
+
+      // Constellation flash — rise fast, fade slowly
+      if (constellLife > 0) {
+        constellLife = Math.max(0, constellLife - 0.007); // ~2.4s total
+        const rise = 0.13;
+        const a = constellLife > (1 - rise)
+          ? ((1 - constellLife) / rise) * 0.55       // 0 → 0.55 in first 13%
+          : (constellLife / (1 - rise)) * 0.55;      // 0.55 → 0 over remainder
+        constellMats.forEach(m => { m.opacity = a; });
+      }
 
       // Pulse city rings
       markers.forEach(({ ring, offset }) => {
