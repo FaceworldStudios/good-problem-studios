@@ -218,8 +218,8 @@
     /* ── Toast ───────────────────────────────────── */
     #toast {
       position: fixed;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
+      bottom: 52px; left: 50%;
+      transform: translateX(-50%);
       font-family: 'Space Mono', monospace;
       font-size: 10px;
       letter-spacing: .3em;
@@ -463,7 +463,7 @@
     function onUp()        { dragging = false; }
 
     function onMove(x, y) {
-      // Cursor
+      // Custom crosshair cursor
       const c = document.getElementById('cursor');
       c.style.left = x + 'px';
       c.style.top  = y + 'px';
@@ -511,69 +511,169 @@
     }
 
     // ── Web Audio ────────────────────────────────────────
+    // Signal chain: osc → gain → [dryBus + reverbNode] → [dryBus → masterOut]
+    //                                                   → [reverbNode → wetBus → masterOut]
     let audioCtx = null;
-    function ctx() {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      return audioCtx;
-    }
+    let dryBus = null, wetBus = null, reverbNode = null, masterOut = null;
+    let droneGainNode = null;
+    let audioReady = false;
 
-    // Pentatonic scale (A minor pentatonic)
-    const SCALE = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.25, 784];
+    // A minor pentatonic, two octaves
+    const SCALE      = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.25, 784];
     const NOTE_NAMES = ['A3','C4','D4','E4','G4','A4','C5','D5','E5','G5'];
 
+    function initAudio() {
+      if (audioReady) return audioCtx;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ac = audioCtx;
+
+      // ── Master output ──────────────────────────────────
+      masterOut = ac.createGain();
+      masterOut.gain.value = 1.0;
+      masterOut.connect(ac.destination);
+
+      // ── Dry bus ────────────────────────────────────────
+      dryBus = ac.createGain();
+      dryBus.gain.value = 0.60;
+      dryBus.connect(masterOut);
+
+      // ── Reverb — synthetic IR, warm organic tail ───────
+      // ~1.8s decay with slight stereo difference for width
+      const dur = 1.8, decay = 2.6;
+      const len = ac.sampleRate * dur;
+      const ir  = ac.createBuffer(2, len, ac.sampleRate);
+      for (let c = 0; c < 2; c++) {
+        const ch = ir.getChannelData(c);
+        for (let i = 0; i < len; i++) {
+          ch[i] = (Math.random() * 2 - 1)
+                * Math.pow(1 - i / len, decay)
+                * (c === 0 ? 1 : 0.92); // slight L/R asymmetry → spaciousness
+        }
+      }
+      reverbNode = ac.createConvolver();
+      reverbNode.buffer = ir;
+
+      wetBus = ac.createGain();
+      wetBus.gain.value = 0.40;
+      reverbNode.connect(wetBus);
+      wetBus.connect(masterOut);
+
+      audioReady = true;
+      return ac;
+    }
+
+    // Send a node's output to both dry and reverb buses
+    function sendToMix(srcNode, vol, attackTime, releaseTime, startOffset = 0) {
+      const ac = initAudio();
+      const t0 = ac.currentTime + startOffset;
+      const gn = ac.createGain();
+      srcNode.connect(gn);
+      gn.connect(dryBus);
+      gn.connect(reverbNode);
+      gn.gain.setValueAtTime(0, t0);
+      gn.gain.linearRampToValueAtTime(vol, t0 + attackTime);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t0 + releaseTime);
+      return gn;
+    }
+
+    // ── Drag tones ─────────────────────────────────────────
     let lastTone = 0;
     function playTone(lat, velocity) {
       const now = Date.now();
-      if (now - lastTone < 90 || velocity < 1.5) return;
+      if (now - lastTone < 85 || velocity < 1.5) return;
       lastTone = now;
-
       try {
-        const ac = ctx();
+        const ac = initAudio();
         const idx  = Math.floor(((lat + 90) / 180) * SCALE.length) % SCALE.length;
         const freq = SCALE[idx];
         document.getElementById('note-name').textContent = NOTE_NAMES[idx];
 
+        const vol = Math.min(0.075, velocity * 0.0032);
+
+        // Root — triangle (warm body)
         const osc = ac.createOscillator();
-        const gn  = ac.createGain();
-        const flt = ac.createBiquadFilter();
-
-        osc.connect(flt); flt.connect(gn); gn.connect(ac.destination);
-        osc.type = 'sine';
+        osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, ac.currentTime);
-        flt.type = 'lowpass';
-        flt.frequency.setValueAtTime(1200, ac.currentTime);
-
-        const vol = Math.min(0.09, velocity * 0.004);
-        gn.gain.setValueAtTime(0, ac.currentTime);
-        gn.gain.linearRampToValueAtTime(vol, ac.currentTime + 0.025);
-        gn.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.55);
-
+        sendToMix(osc, vol, 0.016, 0.65);
         osc.start(ac.currentTime);
-        osc.stop(ac.currentTime + 0.55);
+        osc.stop(ac.currentTime + 0.75);
 
-        // Show note display
+        // Perfect 5th — sine, softer (adds harmonic warmth without muddiness)
+        const osc5 = ac.createOscillator();
+        osc5.type = 'sine';
+        osc5.frequency.setValueAtTime(freq * 1.5, ac.currentTime);
+        sendToMix(osc5, vol * 0.28, 0.022, 0.50);
+        osc5.start(ac.currentTime);
+        osc5.stop(ac.currentTime + 0.60);
+
+        // Note display
         const nd = document.getElementById('note-display');
         nd.textContent = '♩ ' + NOTE_NAMES[idx];
         nd.classList.add('show');
         clearTimeout(nd._t);
-        nd._t = setTimeout(() => nd.classList.remove('show'), 800);
+        nd._t = setTimeout(() => nd.classList.remove('show'), 900);
       } catch (_) {}
     }
 
+    // ── Auto-note during idle rotation ─────────────────────
+    // Reads current globe lat → plays a very soft octave-down note every ~2.6s
+    let lastAutoNote = 0;
+    function maybeAutoNote(ts) {
+      if (dragging || !audioReady) return;
+      if (ts - lastAutoNote < 2600) return;
+      lastAutoNote = ts;
+      try {
+        const ac = initAudio();
+        const lat = -(globe.rotation.x * 180 / Math.PI);
+        const idx  = Math.floor(((lat + 90) / 180) * SCALE.length) % SCALE.length;
+        const freq = SCALE[idx] * 0.5; // Octave down — deeper, like a satellite hum
+
+        const osc = ac.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, ac.currentTime);
+        // Tiny drift: organic imperfection
+        osc.frequency.linearRampToValueAtTime(freq * 1.0025, ac.currentTime + 1.2);
+        sendToMix(osc, 0.026, 0.10, 1.6);
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 1.8);
+      } catch (_) {}
+    }
+
+    // ── Dynamic GPS ping — unique each time ─────────────────
+    // Picks random base note, random interval set, random timing, random contour
     function playPing() {
       try {
-        const ac = ctx();
-        [523.25, 659.25, 880].forEach((f, i) => {
+        const ac = initAudio();
+
+        // Upper half of scale for ping brightness
+        const baseIdx = 4 + Math.floor(Math.random() * 4);
+
+        // Pull 3 random steps from pentatonic intervals [0,2,4,5,7]
+        const pool = [0, 2, 4, 5, 7].sort(() => Math.random() - 0.5).slice(0, 3);
+        // 60% ascending, 40% mixed/descending — keeps it surprising
+        pool.sort((a, b) => Math.random() > 0.4 ? a - b : b - a);
+
+        pool.forEach((step, i) => {
+          const freq = SCALE[(baseIdx + step) % SCALE.length];
+          const gap  = 0.08 + Math.random() * 0.08; // 80–160ms variable spacing
+          const t0   = ac.currentTime + i * gap;
+
           const osc = ac.createOscillator();
-          const gn  = ac.createGain();
-          osc.connect(gn); gn.connect(ac.destination);
-          osc.type = 'sine';
-          const t0 = ac.currentTime + i * 0.12;
-          osc.frequency.setValueAtTime(f, t0);
+          osc.type  = 'sine';
+          osc.frequency.setValueAtTime(freq, t0);
+          // Micro pitch slide → organic, not robotic
+          osc.frequency.linearRampToValueAtTime(freq * 1.003, t0 + 0.05);
+
+          const gn = ac.createGain();
+          osc.connect(gn);
+          gn.connect(dryBus);
+          gn.connect(reverbNode);
+          const vol = 0.065 + Math.random() * 0.025;
           gn.gain.setValueAtTime(0, t0);
-          gn.gain.linearRampToValueAtTime(0.07, t0 + 0.02);
-          gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
-          osc.start(t0); osc.stop(t0 + 0.7);
+          gn.gain.linearRampToValueAtTime(vol, t0 + 0.014);
+          gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+          osc.start(t0);
+          osc.stop(t0 + 1.0);
         });
       } catch (_) {}
     }
@@ -601,7 +701,7 @@
 
     // ── Animation loop ────────────────────────────────────
     let t = 0;
-    function tick() {
+    function tick(ts) {
       requestAnimationFrame(tick);
       t += 0.012;
 
